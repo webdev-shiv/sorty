@@ -134,6 +134,7 @@ class DownloadOrganizerApp:
         history: HistoryManager,
         watcher: DownloadWatcher,
         icon_path: Optional[str | Path] = None,
+        root: Optional[Any] = None,
     ):
         self.config = config
         self.db = db
@@ -150,7 +151,7 @@ class DownloadOrganizerApp:
         self._old_recent_found = self._old_recent_dir.exists() and self._old_recent_dir.is_dir()
         self._old_recent_dismissed = False
 
-        self.root = tk.Tk()
+        self.root = root if root is not None else tk.Tk()
         self.root.title("Sorty")
         self.root.geometry("1060x700")
         self.root.minsize(920, 600)
@@ -538,23 +539,6 @@ class DownloadOrganizerApp:
         hero_frame = tk.Frame(self.content_frame, bg=c["bg_main"])
         hero_frame.pack(fill=tk.X, pady=(0, 14))
 
-        btn_check_downloads = tk.Button(
-            hero_frame,
-            text="🔍  Check Downloads\nScan Downloads Root Now",
-            font=("Segoe UI", 10, "bold"),
-            bg=c["accent"],
-            fg=c["accent_fg"],
-            activebackground=c["accent_hover"],
-            activeforeground=c["accent_fg"],
-            relief=tk.FLAT,
-            bd=0,
-            padx=16,
-            pady=12,
-            cursor="hand2",
-            command=self.check_downloads_dialog,
-        )
-        btn_check_downloads.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 6))
-
         btn_undo = tk.Button(
             hero_frame,
             text="↩️  Undo Sort\nRevert Last Organized Batch",
@@ -570,7 +554,7 @@ class DownloadOrganizerApp:
             cursor="hand2",
             command=self.handle_undo_last_batch,
         )
-        btn_undo.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=4)
+        btn_undo.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 4))
 
         btn_open = tk.Button(
             hero_frame,
@@ -713,18 +697,6 @@ class DownloadOrganizerApp:
             pady=2,
         ).pack(side=tk.RIGHT)
 
-        tk.Button(
-            act_title_bar,
-            text="🔍  Check Downloads",
-            font=("Segoe UI", 8, "bold"),
-            bg=c["accent"],
-            fg=c["accent_fg"],
-            relief=tk.FLAT,
-            cursor="hand2",
-            command=self.check_downloads_dialog,
-            padx=8,
-            pady=2,
-        ).pack(side=tk.RIGHT, padx=(0, 6))
 
         self.recent_items_frame = tk.Frame(activity_subcard, bg=c["bg_card"])
         self.recent_items_frame.pack(fill=tk.X)
@@ -1319,32 +1291,6 @@ class DownloadOrganizerApp:
         toolbar = tk.Frame(self.content_frame, bg=c["bg_main"])
         toolbar.pack(fill=tk.X, pady=(0, 10))
 
-        tk.Button(
-            toolbar,
-            text="🔍  Check Downloads",
-            font=("Segoe UI", 9, "bold"),
-            bg=c["accent"],
-            fg=c["accent_fg"],
-            relief=tk.FLAT,
-            padx=14,
-            pady=5,
-            cursor="hand2",
-            command=self.check_downloads_dialog,
-        ).pack(side=tk.LEFT, padx=(0, 6))
-
-        tk.Button(
-            toolbar,
-            text="⚡  Organize All Now",
-            font=("Segoe UI", 9),
-            bg=c["bg_card"],
-            fg=c["fg_text"],
-            relief=tk.SOLID,
-            bd=1,
-            padx=12,
-            pady=5,
-            cursor="hand2",
-            command=self.manual_organize_now,
-        ).pack(side=tk.LEFT, padx=4)
 
         tk.Button(
             toolbar,
@@ -2466,209 +2412,7 @@ class DownloadOrganizerApp:
     # =========================================================================
 
     def check_downloads_dialog(self) -> None:
-        """
-        Interactive Manual Check workflow (Part 7).
-        Performs ONE explicit scan of the Downloads root, ignores category folders & temp files,
-        classifies with rules, debounces with pending_files, and shows results.
-        """
-        c = self.colors
-        dialog = tk.Toplevel(self.root)
-        dialog.title("Check Downloads")
-        dialog.geometry("540x440")
-        dialog.minsize(460, 360)
-        dialog.transient(self.root)
-        dialog.grab_set()
-        dialog.configure(bg=c["bg_main"])
-
-        # Center dialog relative to main window
-        try:
-            x = self.root.winfo_x() + (self.root.winfo_width() - 540) // 2
-            y = self.root.winfo_y() + (self.root.winfo_height() - 440) // 2
-            dialog.geometry(f"+{max(0, x)}+{max(0, y)}")
-        except Exception:
-            pass
-
-        card = tk.Frame(dialog, bg=c["bg_card"], padx=20, pady=16, highlightbackground=c["border"], highlightthickness=1)
-        card.pack(fill=tk.BOTH, expand=True, padx=16, pady=16)
-
-        lbl_title = tk.Label(card, text="Checking Downloads...", font=("Segoe UI", 13, "bold"), bg=c["bg_card"], fg=c["fg_text"])
-        lbl_title.pack(anchor="w", pady=(0, 10))
-
-        content_area = tk.Frame(card, bg=c["bg_card"])
-        content_area.pack(fill=tk.BOTH, expand=True)
-
-        lbl_progress = tk.Label(content_area, text="Scanning configured Downloads root for eligible files...", font=("Segoe UI", 9), bg=c["bg_card"], fg=c["fg_muted"])
-        lbl_progress.pack(anchor="w", pady=10)
-
-        def _run_scan():
-            result = self.watcher.manual_check_downloads()
-            total_found = result["total_found"]
-            ready_items = result["ready_to_organize"]
-            already_organized = result["already_organized_count"]
-
-            def _show_results():
-                for ch in content_area.winfo_children():
-                    ch.destroy()
-
-                lbl_title.config(text="Check Complete")
-
-                # Metrics summary (Part 7)
-                summary_frame = tk.Frame(content_area, bg=c["bg_card"])
-                summary_frame.pack(fill=tk.X, pady=(0, 8))
-
-                tk.Label(summary_frame, text=f"Files found: {total_found}", font=("Segoe UI", 10), bg=c["bg_card"], fg=c["fg_text"]).pack(anchor="w")
-                tk.Label(summary_frame, text=f"Ready to organize: {len(ready_items)}", font=("Segoe UI", 10, "bold"), bg=c["bg_card"], fg=c["accent"]).pack(anchor="w")
-                tk.Label(summary_frame, text=f"Already organized: {already_organized}", font=("Segoe UI", 10), bg=c["bg_card"], fg=c["success"]).pack(anchor="w")
-
-                tk.Frame(content_area, bg=c["border"], height=1).pack(fill=tk.X, pady=8)
-
-                if ready_items:
-                    ready_lbl = f"{len(ready_items)} file(s) are ready to organize."
-                    tk.Label(content_area, text=ready_lbl, font=("Segoe UI", 10, "bold"), bg=c["bg_card"], fg=c["fg_text"]).pack(anchor="w", pady=(0, 6))
-
-                    # Scrollable list of ready files
-                    list_box_frame = tk.Frame(content_area, bg=c["bg_sidebar"], highlightbackground=c["border"], highlightthickness=1)
-                    list_box_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 12))
-
-                    lb_scroll = ttk.Scrollbar(list_box_frame, orient=tk.VERTICAL)
-                    lb = tk.Listbox(list_box_frame, bg=c["bg_sidebar"], fg=c["fg_text"], font=("Segoe UI", 9), bd=0, highlightthickness=0, yscrollcommand=lb_scroll.set)
-                    lb_scroll.config(command=lb.yview)
-                    lb_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-                    lb.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=4, pady=4)
-
-                    for item in ready_items:
-                        lb.insert(tk.END, f"  {item.filename}  →  {item.suggested_folder} ({item.reason})")
-
-                    # Buttons: [Organize] [Cancel]
-                    btn_row = tk.Frame(content_area, bg=c["bg_card"])
-                    btn_row.pack(fill=tk.X)
-
-                    def _on_organize():
-                        if self.config.review_mode:
-                            for it in ready_items:
-                                it.state = FileState.WAITING_REVIEW
-                                self.watcher.review_queue[str(it.file_path)] = it
-                            dialog.destroy()
-                            if self.current_page == "dashboard":
-                                self.refresh_dashboard()
-                            elif self.current_page == "downloads":
-                                self._populate_downloads_tree()
-                            messagebox.showinfo("Review Mode", f"{len(ready_items)} file(s) placed into Review Queue.")
-                        else:
-                            btn_org.config(state="disabled", text="Organizing...")
-                            res_list = self.watcher.organize_manual_items(ready_items)
-                            success_count = sum(1 for r in res_list if r.success)
-                            dialog.destroy()
-                            if self.current_page == "dashboard":
-                                self.refresh_dashboard()
-                            elif self.current_page == "recent":
-                                self._render_recent_page()
-                            elif self.current_page == "downloads":
-                                self._populate_downloads_tree()
-                            messagebox.showinfo(
-                                "Check Complete",
-                                f"✓ Successfully organized {success_count} file(s)!\nFiles moved to their destination folders safely.",
-                            )
-
-                    btn_org = tk.Button(
-                        btn_row,
-                        text="Organize",
-                        font=("Segoe UI", 9, "bold"),
-                        bg=c["accent"],
-                        fg=c["accent_fg"],
-                        relief=tk.FLAT,
-                        padx=18,
-                        pady=6,
-                        cursor="hand2",
-                        command=_on_organize,
-                    )
-                    btn_org.pack(side=tk.RIGHT, padx=(6, 0))
-
-                    tk.Button(
-                        btn_row,
-                        text="Cancel",
-                        font=("Segoe UI", 9),
-                        bg=c["bg_card"],
-                        fg=c["fg_text"],
-                        relief=tk.SOLID,
-                        bd=1,
-                        padx=14,
-                        pady=6,
-                        cursor="hand2",
-                        command=dialog.destroy,
-                    ).pack(side=tk.RIGHT)
-
-                else:
-                    tk.Label(
-                        content_area,
-                        text="✓ All files in your Downloads root are already organized.\nNo unorganized files found.",
-                        font=("Segoe UI", 9),
-                        bg=c["bg_card"],
-                        fg=c["success"],
-                        pady=20,
-                    ).pack()
-
-                    btn_row = tk.Frame(content_area, bg=c["bg_card"])
-                    btn_row.pack(fill=tk.X)
-                    tk.Button(
-                        btn_row,
-                        text="Close",
-                        font=("Segoe UI", 9),
-                        bg=c["accent"],
-                        fg=c["accent_fg"],
-                        relief=tk.FLAT,
-                        padx=16,
-                        pady=6,
-                        cursor="hand2",
-                        command=dialog.destroy,
-                    ).pack(side=tk.RIGHT)
-
-            self.root.after(0, _show_results)
-
-        threading.Thread(target=_run_scan, daemon=True).start()
-
-    def manual_organize_now(self) -> None:
-        """Instant 1-Click Organize all files in downloads folder."""
-        folder = Path(self.config.downloads_folder)
-        if not folder.exists():
-            messagebox.showerror("Error", f"Folder {folder} does not exist.")
-            return
-
-        from app.watcher import TEMP_DOWNLOAD_EXTENSIONS
-
-        files_to_sort = []
-        for item in folder.iterdir():
-            if item.is_file() and not item.name.startswith("."):
-                if item.suffix.lower() not in TEMP_DOWNLOAD_EXTENSIONS:
-                    files_to_sort.append(item)
-
-        if not files_to_sort:
-            messagebox.showinfo("Sorty", "All files in your Downloads folder are already organized! ✓")
-            return
-
-        organized = 0
-        categories_used = set()
-        for f in files_to_sort:
-            try:
-                res = self.organizer.organize_file(f)
-                if res.success:
-                    organized += 1
-                    categories_used.add(res.category)
-            except Exception as exc:
-                logger.error("Failed organizing %s: %s", f.name, exc)
-
-        if self.current_page == "dashboard":
-            self.refresh_dashboard()
-        elif self.current_page == "recent":
-            self._render_recent_page()
-        elif self.current_page == "downloads":
-            self._populate_downloads_tree()
-
-        cats_str = ", ".join(sorted(list(categories_used))[:4])
-        messagebox.showinfo(
-            "Sorty - Organization Complete",
-            f"✓ Successfully organized {organized} file(s) into: {cats_str}\n\nAll moves are 100% reversible via Undo.",
-        )
+        return
 
     def open_downloads_folder(self) -> None:
         """Open the active downloads directory in Windows File Explorer."""

@@ -71,10 +71,11 @@ def test_matrix_test_a_and_g_background_on_ui_closed():
         shutil.rmtree(temp_dir, ignore_errors=True)
 
 
-def test_matrix_test_b_startup_reconciliation():
+def test_matrix_test_b_no_startup_scan():
     """
-    TEST B: APPLICATION RESTART
-    Files dropped while application was closed are caught by startup reconciliation.
+    TEST B: APPLICATION START
+    Files dropped while application was closed are NOT scanned/moved at startup.
+    The app only reacts to NEW filesystem events.
     """
     temp_dir = Path(tempfile.mkdtemp())
     downloads = temp_dir / "Downloads"
@@ -91,23 +92,19 @@ def test_matrix_test_b_startup_reconciliation():
     org = SafeOrganizer(db=db, classifier=cl, base_downloads_folder=str(downloads))
 
     # File arrived while app was closed
-    missed_file = downloads / "offline_download.zip"
-    missed_file.write_text("Zip data")
+    existing_file = downloads / "offline_download.zip"
+    existing_file.write_text("Zip data")
 
     # Start agent now
     agent = BackgroundAgent(config=config, organizer=org)
     agent.start()
     try:
-        time.sleep(3.0)
+        time.sleep(1.0)
 
-        # File organized by startup reconciliation
+        # File is NOT organized by startup scan (all startup scanning removed per spec 1)
+        assert existing_file.exists()
         dest = downloads / "Archives" / "offline_download.zip"
-        assert dest.exists()
-        assert not missed_file.exists()
-
-        history = HistoryManager(db=db)
-        records = history.get_all_history(limit=5)
-        assert any(r["filename"] == "offline_download.zip" for r in records)
+        assert not dest.exists()
     finally:
         agent.stop()
         shutil.rmtree(temp_dir, ignore_errors=True)
@@ -245,6 +242,7 @@ def test_matrix_test_f_background_off_close_exits():
         "paused": False,
     }
 
+    mock_root = MagicMock()
     app = DownloadOrganizerApp(
         config=config,
         db=db,
@@ -252,6 +250,7 @@ def test_matrix_test_f_background_off_close_exits():
         organizer=org,
         history=history,
         watcher=mock_watcher,
+        root=mock_root,
     )
 
     app.quit_application = MagicMock()

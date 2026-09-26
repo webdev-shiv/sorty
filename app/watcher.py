@@ -238,10 +238,6 @@ class BackgroundAgent:
             # 2. Start watchdog observer on Downloads root only (recursive=False)
             self._start_watcher_observer()
 
-            # 3. Perform ONE startup reconciliation (Part 6)
-            if self.config.auto_organize and not self._paused:
-                self._startup_reconciliation()
-
         if self.on_status_changed:
             self.on_status_changed()
 
@@ -312,30 +308,6 @@ class BackgroundAgent:
         if self.on_status_changed:
             self.on_status_changed()
 
-    # -------------------------------------------------------------
-    # Startup Reconciliation (Part 6)
-    # -------------------------------------------------------------
-
-    def _startup_reconciliation(self) -> None:
-        """
-        Perform ONE startup reconciliation.
-        Checks eligible files in Downloads root that arrived while app was closed,
-        enqueues them, then returns to purely event-driven monitoring.
-        Never continuously scans.
-        """
-        try:
-            if not self.watch_dir.exists():
-                return
-            enqueued_count = 0
-            for item in self.watch_dir.iterdir():
-                if item.is_file() and not item.name.startswith("."):
-                    if item.suffix.lower() not in TEMP_DOWNLOAD_EXTENSIONS:
-                        self.enqueue_event(str(item), "startup")
-                        enqueued_count += 1
-            if enqueued_count > 0:
-                logger.info("Startup reconciliation: enqueued %d missed files for processing.", enqueued_count)
-        except Exception as exc:
-            logger.debug("Error during startup reconciliation: %s", exc)
 
     # -------------------------------------------------------------
     # Event Ingestion & Debouncing (Part 2 & Part 4)

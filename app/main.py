@@ -250,8 +250,6 @@ def main() -> None:
     tray_manager = TrayManager(
         icon_path=icon_path,
         on_show_app=app.show_window,
-        on_check_downloads=app.check_downloads_dialog,
-        on_organize_now=app.manual_organize_now,
         on_pause=lambda: (background_agent.set_paused(True), app.update_status_indicator(), tray_manager.update_menu()),
         on_resume=lambda: (background_agent.set_paused(False), app.update_status_indicator(), tray_manager.update_menu()),
         on_toggle_pause=lambda: (app.toggle_pause(), tray_manager.update_menu()),

@@ -13,16 +13,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import logging
-import mimetypes
 import os
 from pathlib import Path
+import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.rules import RuleEngine, RuleMatchResult
 
 logger = logging.getLogger("DownloadOrganizer.Classifier")
 
-# Default Extension Mappings (Deterministic)
+# Default Extension Mappings (Deterministic per specification)
 EXTENSION_CATEGORIES: Dict[str, Tuple[str, ...]] = {
     "Images": (
         ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".bmp", ".ico", ".tiff", ".tif"
@@ -31,7 +31,7 @@ EXTENSION_CATEGORIES: Dict[str, Tuple[str, ...]] = {
         ".mp4", ".mkv", ".avi", ".mov", ".webm", ".flv", ".m4v", ".wmv"
     ),
     "Audio": (
-        ".mp3", ".wav", ".flac", ".aac", ".m4a", ".ogg", ".wma"
+        ".mp3", ".wav", ".flac", ".aac", ".m4a", ".ogg", ".wma", ".opus"
     ),
     "PDFs": (
         ".pdf",
@@ -70,15 +70,20 @@ for cat, exts in EXTENSION_CATEGORIES.items():
     for ext in exts:
         EXT_TO_CATEGORY[ext.lower()] = cat
 
-# Default Filename Patterns (Spec #11)
+# WhatsApp Filename Regexes (Spec: IMG/VID/AUD/DOC/PTT-YYYYMMDD-WA#### and general IMG-*_WA*)
+WHATSAPP_PATTERNS = [
+    re.compile(r"^(IMG|VID|AUD|DOC|PTT)-\d{8}-WA\d+", re.IGNORECASE),
+    re.compile(r"^(IMG|VID|AUD|DOC|PTT)-.*[-_]WA", re.IGNORECASE),
+    re.compile(r"^(IMG|VID|AUD|DOC|PTT)-.*WA", re.IGNORECASE),
+]
+
+# Default User Filename Rules (Deterministic keyword matching)
 DEFAULT_FILENAME_RULES: List[Tuple[Tuple[str, ...], str]] = [
-    (("whatsapp", "wa_"), "WhatsApp Downloads"),
     (("resume", "cv"), "Resume"),
     (("college", "assignment", "dbms", "btech", "aktu", "semester", "exam"), "College"),
     (("invoice", "bill", "receipt"), "Invoices"),
     (("project", "source-code", "source"), "Projects"),
 ]
-
 
 
 @dataclass
@@ -93,12 +98,27 @@ class Classifier:
     """
     Deterministic file classifier.
     Produces predictable, explainable destination and reason for any file.
+    STRICT PRIORITY:
+    1. WhatsApp filename pattern (priority over extension)
+    2. User filename rules
+    3. Extension
+    4. Others
     """
 
     def __init__(self, rule_engine: Optional[RuleEngine] = None, db_instance=None):
         self.rule_engine = rule_engine or RuleEngine(db_instance=db_instance)
         self.db = db_instance
-        mimetypes.init()
+
+    def is_whatsapp_file(self, filename: str) -> bool:
+        """Check if filename matches WhatsApp download conventions."""
+        stem = Path(filename).stem
+        for pat in WHATSAPP_PATTERNS:
+            if pat.search(filename) or pat.search(stem):
+                return True
+        name_lower = filename.lower()
+        if "whatsapp" in name_lower or name_lower.startswith("wa_"):
+            return True
+        return False
 
     def classify(
         self,
@@ -108,21 +128,29 @@ class Classifier:
         custom_rules: Optional[List[Dict[str, Any]]] = None,
     ) -> ClassificationResult:
         """
-        Classifies a file following the strict 5-tier priority hierarchy:
-        1. User custom rules
-        2. Extension rules
-        3. Filename rules
-        4. MIME type
-        5. Others
+        Classifies a file following the strict 4-tier priority hierarchy:
+        1. WhatsApp filename pattern
+        2. User filename rules
+        3. Extension
+        4. Others
         """
         path = Path(file_path)
         filename = path.name
         ext = path.suffix.lower()
-        stem_lower = path.stem.lower()
         name_lower = filename.lower()
 
         # -------------------------------------------------------------
-        # Tier 1: User Custom Rules (Highest Priority)
+        # Tier 1: WhatsApp Filename Pattern (Priority over extension!)
+        # -------------------------------------------------------------
+        if self.is_whatsapp_file(filename):
+            return ClassificationResult(
+                category="WhatsApp Downloads",
+                destination_folder="WhatsApp Downloads",
+                reason="WhatsApp filename pattern",
+            )
+
+        # -------------------------------------------------------------
+        # Tier 2: User Rules (Custom DB Rules + Default Filename Rules)
         # -------------------------------------------------------------
         if self.rule_engine:
             match = self.rule_engine.evaluate(
@@ -140,8 +168,17 @@ class Classifier:
                     rule_id=match.rule_id,
                 )
 
+        for keywords, target_cat in DEFAULT_FILENAME_RULES:
+            for kw in keywords:
+                if kw in name_lower:
+                    return ClassificationResult(
+                        category=target_cat,
+                        destination_folder=target_cat,
+                        reason=f"Filename contains '{kw}'",
+                    )
+
         # -------------------------------------------------------------
-        # Tier 2: Specific Extension Rules
+        # Tier 3: Extension Rules
         # -------------------------------------------------------------
         # First check if database has custom category extensions
         db_category = self._check_db_category_extensions(ext)
@@ -161,33 +198,7 @@ class Classifier:
             )
 
         # -------------------------------------------------------------
-        # Tier 3: Filename Rules
-        # -------------------------------------------------------------
-        for keywords, target_cat in DEFAULT_FILENAME_RULES:
-            for kw in keywords:
-                if kw in name_lower:
-                    return ClassificationResult(
-                        category=target_cat,
-                        destination_folder=target_cat,
-                        reason=f"Filename contains '{kw}'",
-                    )
-
-        # -------------------------------------------------------------
-        # Tier 4: MIME Type
-        # -------------------------------------------------------------
-        mime, _ = mimetypes.guess_type(filename)
-        if mime:
-            if mime.startswith("image/"):
-                return ClassificationResult(category="Images", destination_folder="Images", reason=f"MIME type: {mime}")
-            elif mime.startswith("video/"):
-                return ClassificationResult(category="Videos", destination_folder="Videos", reason=f"MIME type: {mime}")
-            elif mime.startswith("audio/"):
-                return ClassificationResult(category="Audio", destination_folder="Audio", reason=f"MIME type: {mime}")
-            elif mime.startswith("text/"):
-                return ClassificationResult(category="Documents", destination_folder="Documents", reason=f"MIME type: {mime}")
-
-        # -------------------------------------------------------------
-        # Tier 5: Others (Fallback)
+        # Tier 4: Others (Fallback)
         # -------------------------------------------------------------
         return ClassificationResult(
             category="Others",
@@ -210,3 +221,4 @@ class Classifier:
         except Exception as exc:
             logger.debug("Error checking DB category extensions: %s", exc)
         return None
+

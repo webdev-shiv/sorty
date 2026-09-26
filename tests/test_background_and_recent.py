@@ -238,9 +238,8 @@ def test_tray_menu_structure_and_exit():
     menu = tray._build_menu()
     item_texts = [item.text for item in menu.items]
 
-    # Must contain the exact required items
+    # Must contain the exact required items (Open, Pause Organization, Resume Organization, Open Downloads, Settings, Exit)
     assert "Open" in item_texts
-    assert "Organize Now" in item_texts
     assert "Pause Organization" in item_texts
     assert "Resume Organization" in item_texts
     assert "Open Downloads" in item_texts
@@ -278,6 +277,7 @@ def test_window_close_behavior_background_on_vs_off(temp_environment):
     mock_watcher = MagicMock()
     mock_watcher.is_paused = False
 
+    mock_root = MagicMock()
     app = DownloadOrganizerApp(
         config=config,
         db=db,
@@ -285,6 +285,7 @@ def test_window_close_behavior_background_on_vs_off(temp_environment):
         organizer=organizer,
         history=history,
         watcher=mock_watcher,
+        root=mock_root,
     )
 
     mock_tray = MagicMock()
@@ -597,6 +598,7 @@ def test_old_recent_folder_detection_and_no_deletion(temp_environment):
         "paused": False,
     }
 
+    mock_root = MagicMock()
     app = DownloadOrganizerApp(
         config=config,
         db=db,
@@ -604,6 +606,7 @@ def test_old_recent_folder_detection_and_no_deletion(temp_environment):
         organizer=organizer,
         history=history,
         watcher=mock_watcher,
+        root=mock_root,
     )
 
     try:

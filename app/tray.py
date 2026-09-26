@@ -26,15 +26,15 @@ class TrayManager:
         self,
         icon_path: str | Path,
         on_show_app: Callable[[], None],
-        on_organize_now: Callable[[], None],
+        on_pause: Optional[Callable[[], None]] = None,
+        on_resume: Optional[Callable[[], None]] = None,
         on_toggle_pause: Optional[Callable[[], None]] = None,
         on_open_downloads: Optional[Callable[[], None]] = None,
         on_open_settings: Optional[Callable[[], None]] = None,
         on_exit: Optional[Callable[[], None]] = None,
         is_paused_getter: Optional[Callable[[], bool]] = None,
         on_undo_last: Optional[Callable[[], None]] = None,
-        on_pause: Optional[Callable[[], None]] = None,
-        on_resume: Optional[Callable[[], None]] = None,
+        on_organize_now: Optional[Callable[[], None]] = None,
         on_check_downloads: Optional[Callable[[], None]] = None,
     ):
         self.icon_path = Path(icon_path)
@@ -81,8 +81,6 @@ class TrayManager:
     def _build_menu(self) -> pystray.Menu:
         items = [
             pystray.MenuItem("Open", lambda icon, item: self.on_show_app(), default=True),
-            pystray.MenuItem("Check Downloads", lambda icon, item: self.on_check_downloads()),
-            pystray.MenuItem("Organize Now", lambda icon, item: self.on_organize_now()),
             pystray.MenuItem(
                 "Pause Organization",
                 lambda icon, item: self._handle_pause(),
